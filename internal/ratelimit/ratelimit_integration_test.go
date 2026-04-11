@@ -58,3 +58,24 @@ func TestPruneConcurrent(t *testing.T) {
 
 	wg.Wait() // no race detector errors expected
 }
+
+// TestAllowRespectsCooldown verifies that the same key is denied within the
+// cooldown window and allowed again only after the window has elapsed.
+func TestAllowRespectsCooldown(t *testing.T) {
+	cooldown := 50 * time.Millisecond
+	l := ratelimit.New(cooldown)
+	key := "tcp:9000"
+
+	if !l.Allow(key) {
+		t.Fatal("expected first Allow to return true")
+	}
+	if l.Allow(key) {
+		t.Error("expected second Allow within cooldown to return false")
+	}
+
+	time.Sleep(cooldown + 10*time.Millisecond)
+
+	if !l.Allow(key) {
+		t.Error("expected Allow after cooldown expiry to return true")
+	}
+}
