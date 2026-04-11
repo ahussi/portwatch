@@ -1,89 +1,86 @@
-// Package notify provides desktop and system notification support
-// for portwatch alerts, dispatching messages via OS-native mechanisms.
+// Package notify provides desktop and system notification support for portwatch alerts.
 package notify
 
 import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
+
+	"github.com/user/portwatch/internal/alert"
 )
 
-// Level represents the severity of a notification.
-type Level int
+// Level represents the urgency level of a notification.
+type Level string
 
 const (
-	LevelInfo Level = iota
-	LevelWarn
-	LevelCritical
+	LevelInfo    Level = "info"
+	LevelWarning Level = "warning"
+	LevelCritical Level = "critical"
 )
 
-// String returns a human-readable label for the level.
-func (l Level) String() string {
-	switch l {
-	case LevelInfo:
-		return "info"
-	case LevelWarn:
-		return "warn"
-	case LevelCritical:
-		return "critical"
-	default:
-		return "unknown"
+// Handler sends desktop notifications via OS-native tooling.
+type Handler struct {
+	appName string
+	level   Level
+}
+
+// NewHandler creates a new desktop notification Handler.
+// appName is used as the notification title prefix.
+func NewHandler(appName string, level Level) *Handler {
+	if appName == "" {
+		appName = "portwatch"
 	}
-}
-
-// Notification holds the data for a single desktop notification.
-type Notification struct {
-	Title   string
-	Message string
-	Level   Level
-}
-
-// Notifier dispatches system notifications.
-type Notifier struct {
-	enabled bool
-}
-
-// New creates a Notifier. If enabled is false, Send is a no-op.
-func New(enabled bool) *Notifier {
-	return &Notifier{enabled: enabled}
-}
-
-// Send dispatches n via the OS-native notification mechanism.
-// Returns an error if the underlying command fails; unsupported
-// platforms silently succeed.
-func (n *Notifier) Send(notif Notification) error {
-	if !n.enabled {
-		return nil
+	if level == "" {
+		level = LevelWarning
 	}
+	return &Handler{appName: appName, level: level}
+}
+
+// Handle implements alert.Handler. It dispatches a system notification
+// for the given alert.
+func (h *Handler) Handle(a alert.Alert) error {
+	title := fmt.Sprintf("%s — %s", h.appName, strings.ToUpper(string(h.level)))
+	body := a.String()
+	return h.send(title, body)
+}
+
+// send dispatches the notification using the appropriate OS command.
+func (h *Handler) send(title, body string) error {
+	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		return sendDarwin(notif)
+		script := fmt.Sprintf(`display notification %q with title %q`, body, title)
+		cmd = exec.Command("osascript", "-e", script)
 	case "linux":
-		return sendLinux(notif)
+		urgency := levelToUrgency(h.level)
+		cmd = exec.Command("notify-send", "--urgency", urgency, title, body)
+	case "windows":
+		// PowerShell toast notification (Windows 10+)
+		ps := fmt.Sprintf(
+			`[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null; `+
+				`$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(0); `+
+				`$t.GetElementsByTagName('text')[0].AppendChild($t.CreateTextNode('%s')) | Out-Null; `+
+				`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('%s').Show($t)`,
+			body, title,
+		)
+		cmd = exec.Command("powershell", "-Command", ps)
 	default:
-		// Windows and others: unsupported, no-op.
-		return nil
+		return fmt.Errorf("notify: unsupported OS %q", runtime.GOOS)
 	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("notify: send failed: %w", err)
+	}
+	return nil
 }
 
-func sendDarwin(n Notification) error {
-	script := fmt.Sprintf(
-		`display notification %q with title %q subtitle %q`,
-		n.Message, "portwatch", n.Title,
-	)
-	return exec.Command("osascript", "-e", script).Run()
-}
-
-func sendLinux(n Notification) error {
-	urgency := "normal"
-	if n.Level == LevelCritical {
-		urgency = "critical"
+func levelToUrgency(l Level) string {
+	switch l {
+	case LevelCritical:
+		return "critical"
+	case LevelInfo:
+		return "low"
+	default:
+		return "normal"
 	}
-	return exec.Command(
-		"notify-send",
-		"--urgency", urgency,
-		"--app-name", "portwatch",
-		n.Title,
-		n.Message,
-	).Run()
 }
