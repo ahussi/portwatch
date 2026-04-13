@@ -35,3 +35,16 @@ func TimeoutHook(h Hook, d time.Duration) Hook {
 
 // NoopHook is a Hook that always succeeds without side effects.
 func NoopHook(_ context.Context) error { return nil }
+
+// ChainHooks returns a Hook that runs each provided hook in sequence,
+// stopping and returning the first error encountered.
+func ChainHooks(hooks ...Hook) Hook {
+	return func(ctx context.Context) error {
+		for _, h := range hooks {
+			if err := h(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
