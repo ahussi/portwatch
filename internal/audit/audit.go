@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -59,3 +60,27 @@ func (l *Logger) Close() error {
 
 // Path returns the path of the audit log file.
 func (l *Logger) Path() string { return l.path }
+
+// ReadAll reads and parses all entries from the audit log file at path.
+// Entries are returned in the order they were written.
+func ReadAll(path string) ([]Entry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("audit: open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	var entries []Entry
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var e Entry
+		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+			return nil, fmt.Errorf("audit: parse entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("audit: read %s: %w", path, err)
+	}
+	return entries, nil
+}
