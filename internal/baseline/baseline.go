@@ -41,6 +41,14 @@ func (b *Baseline) Set(key string, e Entry) {
 	b.entries[key] = e
 }
 
+// Delete removes the entry with the given key. It is a no-op if the key does
+// not exist.
+func (b *Baseline) Delete(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.entries, key)
+}
+
 // Has reports whether the key exists in the baseline.
 func (b *Baseline) Has(key string) bool {
 	b.mu.RLock()
